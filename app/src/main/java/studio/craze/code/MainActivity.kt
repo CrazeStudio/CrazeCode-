@@ -11,7 +11,6 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
 
-
 class MainActivity : Activity() {
     private lateinit var web: WebView
     private var pendingSaveText = ""
@@ -31,7 +30,6 @@ class MainActivity : Activity() {
         web.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url.toString()
-                if (url.startsWith("http://127.0.0.1:8080") || url.startsWith("http://localhost:8080")) return false
                 if (url.startsWith("https://") || url.startsWith("http://")) {
                     try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } catch (_: Exception) {}
                     return true
@@ -53,6 +51,7 @@ class MainActivity : Activity() {
                 startActivityForResult(intent, openCode)
             }
         }
+
         @JavascriptInterface fun saveFile(text: String, suggestedName: String) {
             runOnUiThread {
                 pendingSaveText = text
@@ -64,19 +63,6 @@ class MainActivity : Activity() {
                 }
                 startActivityForResult(intent, saveCode)
             }
-        }
-        @JavascriptInterface fun launchTermux() {
-            runOnUiThread {
-                val launch = packageManager.getLaunchIntentForPackage("com.termux")
-                if (launch != null) startActivity(launch)
-                else Toast.makeText(this@MainActivity, "Install Termux from F-Droid or GitHub first.", Toast.LENGTH_LONG).show()
-            }
-        }
-        @JavascriptInterface fun connectCodeServer() {
-            runOnUiThread { web.loadUrl("http://127.0.0.1:8080") }
-        }
-        @JavascriptInterface fun showMessage(message: String) {
-            runOnUiThread { Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show() }
         }
     }
 
