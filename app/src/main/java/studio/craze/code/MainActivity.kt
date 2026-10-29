@@ -76,7 +76,17 @@ class MainActivity : Activity() {
                             "svg" -> "image/svg+xml"
                             else -> "text/plain"
                         }
-                        val doc = DocumentsContract.createDocument(contentResolver, folder, mime, pendingSaveName)
+                        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(folder, DocumentsContract.getTreeDocumentId(folder))
+                        var existing: Uri? = null
+                        contentResolver.query(childrenUri, arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use { cursor ->
+                            while (cursor.moveToNext()) {
+                                if (cursor.getString(1) == pendingSaveName) {
+                                    existing = DocumentsContract.buildDocumentUriUsingTree(folder, cursor.getString(0))
+                                    break
+                                }
+                            }
+                        }
+                        val doc = existing ?: DocumentsContract.createDocument(contentResolver, folder, mime, pendingSaveName)
                             ?: throw IllegalStateException("Could not create file in selected folder")
                         contentResolver.openOutputStream(doc, "wt")?.bufferedWriter()?.use { it.write(pendingSaveText) }
                             ?: throw IllegalStateException("Could not open destination")
