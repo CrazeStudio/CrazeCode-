@@ -1,31 +1,28 @@
 # CrazeCode for Android
 
-CrazeCode is a mobile-first hybrid coding workspace for Android. Stage 2 focuses on editor UI, local workspace files, language modes, suggestions, and a built-in basic console without Termux.
+CrazeCode is a mobile-first coding workspace for Android, built around a responsive editor and a privacy-minded local workspace.
 
 ## Current capabilities
 
-- Responsive dark IDE UI with violet branding, mobile and landscape layouts.
-- CodeMirror syntax modes for 30+ common file/language types where a matching mode is available.
-- Auto-detection by file extension and a manual language-mode selector.
-- Inline keyword/snippet suggestions while typing, plus a suggestions button and Ctrl-Space shortcut.
-- Workspace files and multiple editor tabs, persisted in WebView local storage.
-- Import and export text/code files using Android's Storage Access Framework or browser file picker.
-- Run JavaScript in a short-lived worker where the WebView supports it.
-- Preview HTML/SVG files and CSS against the workspace index.html in a sandboxed preview.
-- Built-in local workspace console: help, ls, pwd, cat, echo, touch, mkdir, rm, date, whoami, clear.
-- Search in current file, code snippets, font size, line numbers, word wrap, and autosave controls.
-- No Termux launch or code-server integration in this stage.
+- Custom CrazeCode SVG mark in the editor header and vector/adaptive Android launcher icon.
+- Responsive dark IDE UI for phones and landscape layouts.
+- CodeMirror language modes and automatic file-extension detection for many common source formats.
+- Manual language-mode selector and keyword/snippet suggestions while typing; Ctrl-Space opens suggestions.
+- Multiple tabs, local workspace files, file creation/deletion, search, snippets, font size, line numbers, word wrap, and autosave.
+- Import files through Android's document picker.
+- Choose a persistent Android folder through the Storage Access Framework; Save writes the current file into that folder. If no folder is selected, Android's Save As picker is used.
+- Run JavaScript in a temporary worker where WebView supports it.
+- Sandboxed HTML/SVG preview and CSS preview using the workspace index.html.
+- Built-in virtual workspace console commands: help, ls, pwd, cat, echo, touch, mkdir, rm, date, whoami, clear.
+- JDK 17 / Android Gradle build workflow.
 
-## Runtime limitations
+## Limitations and next milestones
 
-Language highlighting and suggestions do not mean a language runtime is installed. At this stage, Run executes JavaScript where worker support is available and previews HTML/CSS. Python, Java, C/C++, Kotlin, PHP, SQL, and other languages still need their own interpreter/compiler/runtime before they can execute. The built-in console operates on CrazeCode's virtual workspace only; it is not a Linux or Android shell, does not execute real Git commands, and cannot build Android projects. CodeMirror loads from a CDN when available; offline fallback is plain-text editing.
+- The console is a virtual workspace simulator, not a Linux shell. It does not run arbitrary OS commands or real Git.
+- Syntax highlighting and suggestions are not language runtimes. JavaScript execution and HTML/CSS preview are the current run paths; Python, Java, C/C++, Kotlin and other languages need their own runtimes/compilers.
+- Language support modes and some editor resources are loaded from a CDN when online; plain text fallback is available.
+- Full Git operations, LSP/IntelliSense servers, debugger integration, remote SSH/containers, extension marketplace, and autonomous AI agents are not implemented yet. These require separate backends, runtimes, and explicit integrations.
 
-## Build the APK
+## Build
 
-1. Open this repository's Actions tab.
-2. Select **CrazeCode Android APK**.
-3. Run the workflow, or push a change to the project.
-4. Download the **CrazeCode-debug-apk** artifact from a completed run.
-5. Extract app-debug.apk and install it on Android.
-
-The workflow uses JDK 17 and Android Gradle Plugin 8.7.3.
+Open the repository's **Actions** tab and download the `CrazeCode-debug-apk` artifact from a successful workflow run.
