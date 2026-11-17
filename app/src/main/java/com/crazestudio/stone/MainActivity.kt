@@ -416,7 +416,7 @@ private fun SplashScreen() {
             Text("STONE", color = LocalStoneColors.current.text, fontSize = 32.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.5.sp, modifier = Modifier.padding(top = 14.dp))
             Text("by CrazeStudio", color = LocalStoneColors.current.muted, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
             Spacer(Modifier.height(150.dp))
-            Box(Modifier.width(150.dp).height(4.dp).clip(CircleShape).background(Panel3)) { Box(Modifier.fillMaxWidth(.56f).fillMaxHeight().clip(CircleShape).background(Orange)) }
+            Box(Modifier.width(150.dp).height(4.dp).clip(CircleShape).background(LocalStoneColors.current.line)) { Box(Modifier.fillMaxWidth(.56f).fillMaxHeight().clip(CircleShape).background(Orange)) }
         }
     }
 }
@@ -425,7 +425,7 @@ private fun SplashScreen() {
 private fun HomeScreen(projects: List<File>, onNew: () -> Unit, onOpen: () -> Unit, onClone: () -> Unit, onImport: () -> Unit, onProject: (File) -> Unit, onNavigate: (Page) -> Unit, onSearch: () -> Unit) {
     Column(Modifier.fillMaxSize().background(LocalStoneColors.current.bg).windowInsetsPadding(WindowInsets.navigationBars)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            StoneBrand(true); Spacer(Modifier.weight(1f)); IconAction(Icons.Default.Search, "Search", onSearch); IconAction(Icons.Default.NotificationsNone, "Notifications") {}
+            StoneBrand(true); Spacer(Modifier.weight(1f)); IconAction(Icons.Default.Search, "Search", onSearch); IconAction(Icons.Default.NotificationsNone, "Notifications", click = {})
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 17.dp)) {
             Text("Hello, Mehetab 👋", color = LocalStoneColors.current.text, fontSize = 23.sp, fontWeight = FontWeight.Bold)
@@ -487,7 +487,7 @@ private fun EditorScreen(project: File, tabs: List<String>, active: String?, tex
     onText: (String) -> Unit, onTab: (String) -> Unit, onClose: (String) -> Unit, onSave: () -> Unit, onTerminal: () -> Unit, onRun: () -> Unit, onTool: (Page) -> Unit, onExplorer: () -> Unit) {
     Column(Modifier.fillMaxSize().background(LocalStoneColors.current.bg)) {
         Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconAction(Icons.Default.Menu, "Explorer", onExplorer); IconAction(Icons.Default.ArrowBack, "Home") { onTool(Page.HOME) }
+            IconAction(Icons.Default.Menu, "Explorer", onExplorer); IconAction(Icons.Default.ArrowBack, "Home", click = { onTool(Page.HOME) })
             Spacer(Modifier.weight(1f)); StoneMark(24.dp); Spacer(Modifier.weight(1f))
             IconAction(Icons.Default.Save, "Save", onSave); IconAction(Icons.Default.PlayArrow, "Run", onRun, Orange); IconAction(Icons.Default.MoreVert, "Terminal", onTerminal)
         }
@@ -503,7 +503,7 @@ private fun EditorScreen(project: File, tabs: List<String>, active: String?, tex
             Column(Modifier.weight(1f)) {
                 Row(Modifier.fillMaxWidth().height(41.dp).background(LocalStoneColors.current.panel).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
                     tabs.forEach { path ->
-                        Row(Modifier.background(if (path == active) LocalStoneColors.current.panel2 else LocalStoneColors.current.panel).padding(start = 9.dp, end = 5.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.background(if (path == active) LocalStoneColors.current.panel2 else LocalStoneColors.current.panel).padding(start = 9.dp, end = 5.dp, top = 9.dp, bottom = 9.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.InsertDriveFile, null, tint = LocalStoneColors.current.muted, modifier = Modifier.size(13.dp))
                             Text(File(path).name, color = if (path == active) LocalStoneColors.current.text else LocalStoneColors.current.muted, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 6.dp))
                             if (path == active && dirty) Text("•", color = Orange, fontSize = 12.sp)
@@ -545,7 +545,7 @@ private fun ExplorerScreen(project: File, onBack: () -> Unit, onOpen: (File) -> 
     var showHidden by remember { mutableStateOf(false) }
     val files = project.walkTopDown().drop(1).filter { showHidden || !it.name.startsWith(".") }.toList().sortedWith(compareBy<File>({ it.isFile }, { it.relativeTo(project).path.lowercase(Locale.ROOT) }))
     Column(Modifier.fillMaxSize().background(LocalStoneColors.current.bg)) {
-        PageHeader("Explorer", onBack, { IconAction(Icons.Default.Add, "New file") { relativePath = ""; showCreate = true }; IconAction(Icons.Default.MoreVert, "Show hidden files") { showHidden = !showHidden } })
+        PageHeader("Explorer", onBack, { IconAction(Icons.Default.Add, "New file", click = { relativePath = ""; showCreate = true }); IconAction(Icons.Default.MoreVert, "Show hidden files", click = { showHidden = !showHidden }) })
         Row(Modifier.padding(horizontal = 16.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.ExpandMore, null, tint = LocalStoneColors.current.muted); Text(project.name, color = LocalStoneColors.current.text, fontWeight = FontWeight.SemiBold, fontSize = 13.sp) }
         LazyColumn(Modifier.weight(1f).padding(horizontal = 12.dp)) {
             items(files, key = { it.absolutePath }) { file ->
