@@ -1,6 +1,7 @@
 package com.crazestudio.stone.terminal
 
 import androidx.compose.ui.text.AnnotatedString
+import com.crazestudio.stone.linux.LinuxEnv
 import com.crazestudio.stone.pkg.StonePackageManager
 import com.crazestudio.stone.ui.theme.AnsiPalette
 import kotlinx.coroutines.CoroutineScope
@@ -27,7 +28,9 @@ data class TerminalTabState(
     val commandHistory: List<String> = emptyList(),
     val historyIndex: Int = -1,
     val ctrlActive: Boolean = false,
-    val lastExitCode: Int? = null
+    val lastExitCode: Int? = null,
+    /** true while this tab is running the Alpine Linux shell instead of Android's /system/bin/sh */
+    val linux: Boolean = false
 )
 
 private class ActiveShellHandle(
@@ -35,7 +38,8 @@ private class ActiveShellHandle(
     val buffer: AnsiTerminalBuffer = AnsiTerminalBuffer(),
     var process: Process? = null,
     var writer: BufferedWriter? = null,
-    var readerJob: Job? = null
+    var readerJob: Job? = null,
+    var linuxMode: Boolean = false
 )
 
 class TerminalSessionManager(
@@ -54,8 +58,11 @@ class TerminalSessionManager(
 
     private var sessionCounter = 1
 
-    /** apt-style package manager; installs into <filesDir>/usr and puts usr/bin on PATH. */
+    /** apt-style package manager for static binaries; installs into <filesDir>/usr (on PATH). */
     private val pkgManager by lazy { StonePackageManager(appFilesDir, appCacheDir) }
+
+    /** Real Linux (PRoot + Alpine) like Acode's terminal; `linux setup` then `linux`. */
+    private val linuxEnv by lazy { LinuxEnv(appFilesDir, appCacheDir) }
 
     fun ensureDefaultSession(projectDir: File) {
         if (_tabs.value.isEmpty()) {
@@ -71,7 +78,7 @@ class TerminalSessionManager(
         handles[id] = handle
 
         handle.buffer.append("\u001B[1;38;2;255;121;0mSTONE SHELL\u001B[0m · Android Sandbox (/system/bin/sh)\n")
-        handle.buffer.append("\u001B[2mType 'help' or 'stone-env' for available binaries & web runners. Try 'apt update' then 'apt install jq'.\u001B[0m\n")
+        handle.buffer.append("\u001B[2mType 'help' for details. Real Linux: 'linux setup' once, then 'linux'.\u001B[0m\n")
 
         val state = TerminalTabState(
             id = id,
@@ -201,7 +208,8 @@ class TerminalSessionManager(
         }
 
         val shortDir = tab.workingDir.name.ifBlank { "/" }
-        handle.buffer.append("\n\u001B[1;38;2;255;121;0mstone\u001B[0m:\u001B[36m$shortDir\u001B[0m$ $cmd\n")
+        val promptName = if (handle.linuxMode) "alpine" else "stone"
+        handle.buffer.append("\n\u001B[1;38;2;255;121;0m$promptName\u001B[0m:\u001B[36m$shortDir\u001B[0m$ $cmd\n")
 
         when {
             cmd == "clear" -> {
@@ -214,7 +222,17 @@ class TerminalSessionManager(
                 bumpRevision(tabId)
                 return
             }
-            isPackageCommand(cmd) -> {
+            // `exit` inside Alpine leaves Linux and returns to the Android shell
+            handle.linuxMode && (cmd == "exit" || cmd == "linux exit") -> {
+                leaveLinux(tabId, handle, tab.workingDir)
+                return
+            }
+            cmd == "linux" || cmd.startsWith("linux ") -> {
+                runLinuxCommand(tabId, handle, tab, cmd.removePrefix("linux").trim())
+                return
+            }
+            // Inside Alpine, `apt` is the Alpine wrapper around apk, so only intercept on Android's sh
+            !handle.linuxMode && isPackageCommand(cmd) -> {
                 runPackageCommand(tabId, handle, cmd)
                 return
             }
@@ -273,6 +291,13 @@ class TerminalSessionManager(
         val safe = sanitizeDir(projectDir)
         val handle = handles[tabId] ?: return
         updateTab(tabId) { it.copy(workingDir = safe) }
+        if (handle.linuxMode) {
+            // The project folder is bind-mounted at /work, so Linux needs a restart to see the new one.
+            restartShell(handle, safe)
+            handle.buffer.append("\u001B[2mLinux restarted with ${safe.name} mounted at /work\u001B[0m\n")
+            bumpRevision(tabId)
+            return
+        }
         if (handle.process?.isAlive == true) {
             scope.launch(Dispatchers.IO) {
                 runCatching {
@@ -284,6 +309,104 @@ class TerminalSessionManager(
                 }
             }
         }
+    }
+
+    // ------------------------------------------------------------ linux (proot + alpine)
+
+    private fun runLinuxCommand(tabId: String, handle: ActiveShellHandle, tab: TerminalTabState, arg: String) {
+        val parts = arg.split(Regex("\\s+")).filter { it.isNotEmpty() }
+        when (parts.firstOrNull() ?: "start") {
+            "setup", "install" -> {
+                updateTab(tabId) { it.copy(isRunning = true, revision = it.revision + 1) }
+                scope.launch(Dispatchers.IO) {
+                    val code = try {
+                        linuxEnv.setup { text ->
+                            handle.buffer.append(text)
+                            bumpRevision(tabId)
+                        }
+                    } catch (e: Exception) {
+                        handle.buffer.append("\u001B[31mE: ${e.message}\u001B[0m\n")
+                        1
+                    }
+                    updateTab(tabId) { it.copy(isRunning = false, lastExitCode = code, revision = it.revision + 1) }
+                }
+            }
+            "start", "enter" -> {
+                if (!linuxEnv.isInstalled()) {
+                    handle.buffer.append("\u001B[33mLinux is not installed yet. Run: linux setup\u001B[0m\n")
+                    bumpRevision(tabId)
+                } else {
+                    enterLinux(tabId, handle, tab.workingDir)
+                }
+            }
+            "test" -> {
+                updateTab(tabId) { it.copy(isRunning = true, revision = it.revision + 1) }
+                scope.launch(Dispatchers.IO) {
+                    val ok = runCatching {
+                        linuxEnv.test { text -> handle.buffer.append(text); bumpRevision(tabId) }
+                    }.getOrDefault(false)
+                    handle.buffer.append(if (ok) "\u001B[32mLinux works.\u001B[0m\n" else "\u001B[31mLinux test failed. Try: linux compat on\u001B[0m\n")
+                    updateTab(tabId) { it.copy(isRunning = false, lastExitCode = if (ok) 0 else 1, revision = it.revision + 1) }
+                }
+            }
+            "compat" -> {
+                when (parts.getOrNull(1)) {
+                    "on" -> { linuxEnv.setCompatMode(true); handle.buffer.append("Compatibility mode ON (slower, works on more devices). Re-enter with: linux\n") }
+                    "off" -> { linuxEnv.setCompatMode(false); handle.buffer.append("Compatibility mode OFF. Re-enter with: linux\n") }
+                    else -> handle.buffer.append("Compatibility mode is ${if (linuxEnv.compatMode()) "ON" else "OFF"}. Use: linux compat on|off\n")
+                }
+                bumpRevision(tabId)
+            }
+            "status" -> {
+                val v = linuxEnv.installedVersion()
+                handle.buffer.append(
+                    if (linuxEnv.isInstalled()) "Linux: installed (${v ?: "alpine"}), compat ${if (linuxEnv.compatMode()) "on" else "off"}\n"
+                    else "Linux: not installed (run: linux setup)\n"
+                )
+                bumpRevision(tabId)
+            }
+            "reset", "remove" -> {
+                if (handle.linuxMode) leaveLinux(tabId, handle, tab.workingDir)
+                linuxEnv.reset()
+                handle.buffer.append("Linux removed. Run 'linux setup' to install again.\n")
+                bumpRevision(tabId)
+            }
+            else -> {
+                handle.buffer.append(
+                    "\u001B[1mlinux\u001B[0m - real Alpine Linux via PRoot\n" +
+                        "  linux setup        download PRoot + Alpine (once, ~10 MB)\n" +
+                        "  linux              enter Alpine (project folder is mounted at /work)\n" +
+                        "  exit               leave Alpine, back to the Android shell\n" +
+                        "  linux status | test | compat on|off | reset\n" +
+                        "Inside Alpine: apk add python3 git nodejs  (or: apt install ...)\n"
+                )
+                bumpRevision(tabId)
+            }
+        }
+    }
+
+    private fun enterLinux(tabId: String, handle: ActiveShellHandle, workDir: File) {
+        handle.linuxMode = true
+        restartShell(handle, workDir)
+        updateTab(tabId) { it.copy(linux = true, isRunning = false, revision = it.revision + 1) }
+        handle.buffer.append("\u001B[1;38;2;255;121;0mAlpine Linux\u001B[0m · project mounted at /work · type 'exit' to leave\n")
+        handle.buffer.append("\u001B[2mInstall tools with: apk add python3 git nodejs   (apt install works too)\u001B[0m\n")
+        bumpRevision(tabId)
+    }
+
+    private fun leaveLinux(tabId: String, handle: ActiveShellHandle, workDir: File) {
+        handle.linuxMode = false
+        restartShell(handle, workDir)
+        updateTab(tabId) { it.copy(linux = false, isRunning = false, revision = it.revision + 1) }
+        handle.buffer.append("\u001B[2mBack in the Android shell.\u001B[0m\n")
+        bumpRevision(tabId)
+    }
+
+    private fun restartShell(handle: ActiveShellHandle, workDir: File) {
+        handle.readerJob?.cancel()
+        runCatching { handle.writer?.close() }
+        runCatching { handle.process?.destroyForcibly() }
+        spawnShellProcess(handle, workDir)
     }
 
     // ------------------------------------------------------------ package manager
@@ -313,21 +436,34 @@ class TerminalSessionManager(
     private fun spawnShellProcess(handle: ActiveShellHandle, workingDir: File) {
         val safeDir = sanitizeDir(workingDir)
         pkgManager.ensureDirs()
-        val pb = ProcessBuilder("/system/bin/sh")
-            .directory(safeDir)
-            .redirectErrorStream(true)
-        val basePath = pb.environment()["PATH"] ?: "/system/bin:/system/xbin"
-        val env = mapOf(
-            "TERM" to "xterm-256color",
-            "COLORTERM" to "truecolor",
-            "HOME" to safeDir.absolutePath,
-            "TMPDIR" to appCacheDir.absolutePath,
-            "PROJECT_DIR" to safeDir.absolutePath,
-            "PREFIX" to pkgManager.prefix.absolutePath,
-            "PATH" to "${pkgManager.binDir.absolutePath}:$basePath",
-            "STONE_SANDBOX" to "1"
-        )
-        pb.environment().putAll(env)
+
+        if (handle.linuxMode && !linuxEnv.isInstalled()) {
+            handle.linuxMode = false
+            updateTab(handle.id) { it.copy(linux = false) }
+        }
+
+        val pb: ProcessBuilder
+        if (handle.linuxMode) {
+            val spec = linuxEnv.launchSpec(safeDir, listOf("/bin/sh"))
+            pb = ProcessBuilder(spec.command).directory(safeDir).redirectErrorStream(true)
+            pb.environment().putAll(spec.env)
+        } else {
+            pb = ProcessBuilder("/system/bin/sh")
+                .directory(safeDir)
+                .redirectErrorStream(true)
+            val basePath = pb.environment()["PATH"] ?: "/system/bin:/system/xbin"
+            val env = mapOf(
+                "TERM" to "xterm-256color",
+                "COLORTERM" to "truecolor",
+                "HOME" to safeDir.absolutePath,
+                "TMPDIR" to appCacheDir.absolutePath,
+                "PROJECT_DIR" to safeDir.absolutePath,
+                "PREFIX" to pkgManager.prefix.absolutePath,
+                "PATH" to "${pkgManager.binDir.absolutePath}:$basePath",
+                "STONE_SANDBOX" to "1"
+            )
+            pb.environment().putAll(env)
+        }
 
         val process = pb.start()
         handle.process = process
@@ -371,6 +507,7 @@ class TerminalSessionManager(
             }
             val exitCode = match.groupValues[1].toIntOrNull()
             val newPwd = match.groupValues[2].trim()
+            // In Alpine the PWD is a guest path (e.g. /work), which is not a host directory: ignored here.
             val resolvedDir = File(newPwd).takeIf { it.isDirectory && it.canonicalPath.startsWith(appFilesDir.canonicalPath) }
             updateTab(handle.id) {
                 it.copy(
@@ -409,12 +546,14 @@ class TerminalSessionManager(
 
         handle.buffer.append("\u001B[1;36mSTONE Verified Runtime Report\u001B[0m\n")
         handle.buffer.append("Working Dir : ${workingDir.absolutePath}\n")
-        handle.buffer.append("Shell       : /system/bin/sh (persistent PTY-style session)\n")
-        handle.buffer.append("Prefix      : ${pkgManager.prefix.absolutePath} (packages install to \$PREFIX/bin)\n")
+        handle.buffer.append("Shell       : ${if (handle.linuxMode) "Alpine Linux (PRoot)" else "/system/bin/sh"} (persistent session)\n")
+        handle.buffer.append("Linux       : ${if (linuxEnv.isInstalled()) "installed" else "not installed (run: linux setup)"}\n")
+        handle.buffer.append("Prefix      : ${pkgManager.prefix.absolutePath} (static packages install to \$PREFIX/bin)\n")
         handle.buffer.append("\u001B[32mAvailable   :\u001B[0m ${found.joinToString(", ")}\n")
         handle.buffer.append("\u001B[33mNot installed:\u001B[0m ${absent.joinToString(", ")}\n")
         handle.buffer.append("\u001B[1;38;2;255;121;0mSTONE Builtins:\u001B[0m\n")
-        handle.buffer.append("  apt <cmd>            Package manager: update, install, remove, upgrade, list, search, show\n")
+        handle.buffer.append("  linux setup | linux  Real Alpine Linux (apk add python3 git nodejs ...)\n")
+        handle.buffer.append("  apt <cmd>            Static-binary packages on Android's shell (update, install, remove, ...)\n")
         handle.buffer.append("  preview [file.html]  Open local WebView HTML/CSS/JS preview\n")
         handle.buffer.append("  runjs [file.js]      Execute JavaScript in STONE JS Console\n")
         handle.buffer.append("  stone-env / help     Show this real environment report\n")
