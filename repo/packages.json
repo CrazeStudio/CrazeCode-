@@ -1,0 +1,36 @@
+{
+  "packages": [
+    {
+      "name": "jq",
+      "version": "1.7.1",
+      "description": "Command-line JSON processor",
+      "type": "bin",
+      "urls": {
+        "aarch64": "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-arm64",
+        "x86_64": "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64"
+      }
+    },
+    {
+      "name": "busybox",
+      "version": "1.31.0",
+      "description": "Static BusyBox: hundreds of Unix tools in one binary (run: busybox <applet>)",
+      "type": "bin",
+      "urls": {
+        "aarch64": "https://busybox.net/downloads/binaries/1.31.0-defconfig-multiarch-musl/busybox-armv8l",
+        "x86_64": "https://busybox.net/downloads/binaries/1.31.0-defconfig-multiarch-musl/busybox-x86_64"
+      }
+    },
+    {
+      "name": "micro",
+      "version": "2.0.14",
+      "description": "Modern terminal text editor (static Go binary)",
+      "type": "tar.gz",
+      "strip": 1,
+      "urls": {
+        "aarch64": "https://github.com/zyedidia/micro/releases/download/v2.0.14/micro-2.0.14-linux-arm64.tar.gz",
+        "x86_64": "https://github.com/zyedidia/micro/releases/download/v2.0.14/micro-2.0.14-linux64-static.tar.gz"
+      },
+      "bins": { "micro": "micro" }
+    }
+  ]
+}

@@ -11,9 +11,16 @@ android {
     defaultConfig {
         applicationId = "com.crazestudio.stone"
         minSdk = 26
-        targetSdk = 34
+        // targetSdk 28 on purpose: Android 10+ blocks executing downloaded binaries from the app's
+        // data dir for apps targeting 29+. apt-installed packages (usr/bin) need exec to work.
+        targetSdk = 28
         versionCode = 1
         versionName = "1.0.0"
+    }
+
+    lint {
+        // ExpiredTargetSdkVersion is a Play Store rule; this app is sideloaded.
+        disable += "ExpiredTargetSdkVersion"
     }
 
     signingConfigs {

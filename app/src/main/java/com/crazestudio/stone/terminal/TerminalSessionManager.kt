@@ -1,6 +1,7 @@
 package com.crazestudio.stone.terminal
 
 import androidx.compose.ui.text.AnnotatedString
+import com.crazestudio.stone.pkg.StonePackageManager
 import com.crazestudio.stone.ui.theme.AnsiPalette
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,6 +54,9 @@ class TerminalSessionManager(
 
     private var sessionCounter = 1
 
+    /** apt-style package manager; installs into <filesDir>/usr and puts usr/bin on PATH. */
+    private val pkgManager by lazy { StonePackageManager(appFilesDir, appCacheDir) }
+
     fun ensureDefaultSession(projectDir: File) {
         if (_tabs.value.isEmpty()) {
             createSession(projectDir)
@@ -67,7 +71,7 @@ class TerminalSessionManager(
         handles[id] = handle
 
         handle.buffer.append("\u001B[1;38;2;255;121;0mSTONE SHELL\u001B[0m · Android Sandbox (/system/bin/sh)\n")
-        handle.buffer.append("\u001B[2mType 'help' or 'stone-env' for available binaries & web runners.\u001B[0m\n")
+        handle.buffer.append("\u001B[2mType 'help' or 'stone-env' for available binaries & web runners. Try 'apt update' then 'apt install jq'.\u001B[0m\n")
 
         val state = TerminalTabState(
             id = id,
@@ -210,6 +214,10 @@ class TerminalSessionManager(
                 bumpRevision(tabId)
                 return
             }
+            isPackageCommand(cmd) -> {
+                runPackageCommand(tabId, handle, cmd)
+                return
+            }
             cmd.startsWith("preview") -> {
                 val arg = cmd.removePrefix("preview").trim().ifBlank { "index.html" }
                 val target = resolveSafeWorkingFile(tab.workingDir, arg)
@@ -278,19 +286,47 @@ class TerminalSessionManager(
         }
     }
 
+    // ------------------------------------------------------------ package manager
+
+    private fun isPackageCommand(cmd: String): Boolean {
+        val first = cmd.removePrefix("sudo ").trim().substringBefore(' ')
+        return first in StonePackageManager.COMMAND_NAMES
+    }
+
+    private fun runPackageCommand(tabId: String, handle: ActiveShellHandle, cmd: String) {
+        val args = cmd.removePrefix("sudo ").trim().split(Regex("\\s+"))
+        updateTab(tabId) { it.copy(isRunning = true, revision = it.revision + 1) }
+        scope.launch(Dispatchers.IO) {
+            val code = try {
+                pkgManager.execute(args) { text ->
+                    handle.buffer.append(text)
+                    bumpRevision(tabId)
+                }
+            } catch (e: Exception) {
+                handle.buffer.append("\u001B[31mE: ${e.message}\u001B[0m\n")
+                1
+            }
+            updateTab(tabId) { it.copy(isRunning = false, lastExitCode = code, revision = it.revision + 1) }
+        }
+    }
+
     private fun spawnShellProcess(handle: ActiveShellHandle, workingDir: File) {
         val safeDir = sanitizeDir(workingDir)
+        pkgManager.ensureDirs()
+        val pb = ProcessBuilder("/system/bin/sh")
+            .directory(safeDir)
+            .redirectErrorStream(true)
+        val basePath = pb.environment()["PATH"] ?: "/system/bin:/system/xbin"
         val env = mapOf(
             "TERM" to "xterm-256color",
             "COLORTERM" to "truecolor",
             "HOME" to safeDir.absolutePath,
             "TMPDIR" to appCacheDir.absolutePath,
             "PROJECT_DIR" to safeDir.absolutePath,
+            "PREFIX" to pkgManager.prefix.absolutePath,
+            "PATH" to "${pkgManager.binDir.absolutePath}:$basePath",
             "STONE_SANDBOX" to "1"
         )
-        val pb = ProcessBuilder("/system/bin/sh")
-            .directory(safeDir)
-            .redirectErrorStream(true)
         pb.environment().putAll(env)
 
         val process = pb.start()
@@ -367,14 +403,18 @@ class TerminalSessionManager(
     private fun printSandboxEnvironment(handle: ActiveShellHandle, workingDir: File) {
         val bins = listOf("sh", "toybox", "ls", "cat", "grep", "find", "sed", "awk", "uname", "ps", "df", "id", "ping", "curl")
         val found = bins.filter { File("/system/bin/$it").exists() || File("/system/xbin/$it").exists() }
-        val absent = listOf("apt", "python3", "node", "gcc", "git").filterNot { File("/system/bin/$it").exists() }
+        val absent = listOf("python3", "node", "gcc", "git").filterNot {
+            File("/system/bin/$it").exists() || File(pkgManager.binDir, it).exists()
+        }
 
         handle.buffer.append("\u001B[1;36mSTONE Verified Runtime Report\u001B[0m\n")
         handle.buffer.append("Working Dir : ${workingDir.absolutePath}\n")
         handle.buffer.append("Shell       : /system/bin/sh (persistent PTY-style session)\n")
+        handle.buffer.append("Prefix      : ${pkgManager.prefix.absolutePath} (packages install to \$PREFIX/bin)\n")
         handle.buffer.append("\u001B[32mAvailable   :\u001B[0m ${found.joinToString(", ")}\n")
-        handle.buffer.append("\u001B[33mNot on Stock Android:\u001B[0m ${absent.joinToString(", ")}\n")
+        handle.buffer.append("\u001B[33mNot installed:\u001B[0m ${absent.joinToString(", ")}\n")
         handle.buffer.append("\u001B[1;38;2;255;121;0mSTONE Builtins:\u001B[0m\n")
+        handle.buffer.append("  apt <cmd>            Package manager: update, install, remove, upgrade, list, search, show\n")
         handle.buffer.append("  preview [file.html]  Open local WebView HTML/CSS/JS preview\n")
         handle.buffer.append("  runjs [file.js]      Execute JavaScript in STONE JS Console\n")
         handle.buffer.append("  stone-env / help     Show this real environment report\n")
